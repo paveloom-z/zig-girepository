@@ -1,0 +1,6 @@
+id: o1af7tuprkqa70otix94113be0r7lnqyce1z2x9z0k3j6u56
+name: girepository
+main: src/girepository.zig
+license: MIT
+description: Zig bindings for the `girepository` library
+dependencies:
