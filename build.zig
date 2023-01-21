@@ -22,7 +22,7 @@ pub fn build(b: *std.build.Builder) !void {
         .dependencies = &.{},
     };
     // Add the generate executable
-    const generate = b.addExecutable("generate", "gir/generate.zig");
+    const generate = b.addExecutable("generate", "generate/main.zig");
     // For each executable
     inline for (.{
         .{ generate, "Generate the bindings" },

@@ -12,4 +12,4 @@ leak.txt
 vgcore*
 
 # GObject Introspection
-gir/*.typelib
+generate/test
