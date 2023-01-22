@@ -3,15 +3,6 @@ const std = @import("std");
 const stdin = std.io.getStdIn().reader();
 const stdout = std.io.getStdOut().writer();
 
-/// Handle the failed to open case
-fn failedOpen(output_dir_path: []const u8) anyerror {
-    std.log.err(
-        "Couldn't open the output directory `{s}`",
-        .{output_dir_path},
-    );
-    return error.Error;
-}
-
 // Ask the user whether we should proceed
 // with overwriting the directory
 fn askOverwriteDir() !void {
@@ -31,27 +22,10 @@ fn askOverwriteDir() !void {
     }
 }
 
-/// Handle the creation errors
-fn handleFsError(
-    fs_err: std.os.MakeDirError,
-    output_dir_path: []const u8,
-) !void {
-    switch (fs_err) {
-        std.os.MakeDirError.PathAlreadyExists => {
-            try askOverwriteDir();
-        },
-        else => {
-            std.log.err(
-                "Couldn't create the directory `{s}`",
-                .{output_dir_path},
-            );
-            return error.Error;
-        },
-    }
-}
-
 /// Get the output directory from the arguments
-pub fn getOutputDir(args: *std.process.ArgIterator) !std.fs.Dir {
+pub fn getOutputDir(allocator: std.mem.Allocator) !std.fs.Dir {
+    // Prepare an arguments iterator
+    var args = try std.process.argsWithAllocator(allocator);
     // Skip the first argument (which is a path to the binary)
     _ = args.skip();
     // Try to get the second argument
@@ -59,21 +33,58 @@ pub fn getOutputDir(args: *std.process.ArgIterator) !std.fs.Dir {
         std.log.err("Please provide a path to the output directory.", .{});
         return error.Error;
     };
-    // Prepare the output directory
-    if (std.fs.path.isAbsolute(output_dir_path)) {
-        std.fs.makeDirAbsolute(output_dir_path) catch |fs_err| {
-            try handleFsError(fs_err, output_dir_path);
-        };
-        return std.fs.openDirAbsolute(output_dir_path, .{}) catch {
-            return failedOpen(output_dir_path);
-        };
-    } else {
-        const cwd = std.fs.cwd();
-        cwd.makeDir(output_dir_path) catch |fs_err| {
-            try handleFsError(fs_err, output_dir_path);
-        };
-        return cwd.openDir(output_dir_path, .{}) catch {
-            return failedOpen(output_dir_path);
-        };
-    }
+    // Create the directory if it doesn't exist,
+    // then return a handle. Works for absolute
+    // paths, too
+    const cwd = std.fs.cwd();
+    cwd.makeDir(output_dir_path) catch |fs_err| {
+        switch (fs_err) {
+            std.os.MakeDirError.PathAlreadyExists => {
+                // Ask for a permission to overwrite the output directory
+                try askOverwriteDir();
+                // If the permission is granted, recursively delete
+                // the contents of the output directory
+                var iterable_dir = cwd.makeOpenPathIterable(output_dir_path, .{}) catch {
+                    std.log.err(
+                        "Couldn't iterate over the directory `{s}`.",
+                        .{output_dir_path},
+                    );
+                    return error.Error;
+                };
+                defer iterable_dir.close();
+                var iterator = iterable_dir.iterate();
+                while (iterator.next() catch null) |entry| {
+                    switch (entry.kind) {
+                        .File => iterable_dir.dir.deleteFile(entry.name) catch {
+                            std.log.warn(
+                                "Couldn't delete file `{s}`.",
+                                .{entry.name},
+                            );
+                        },
+                        .Directory => iterable_dir.dir.deleteTree(entry.name) catch {
+                            std.log.warn(
+                                "Couldn't delete tree `{s}`.",
+                                .{entry.name},
+                            );
+                        },
+                        else => {},
+                    }
+                }
+            },
+            else => {
+                std.log.err(
+                    "Couldn't create the directory `{s}`.",
+                    .{output_dir_path},
+                );
+                return error.Error;
+            },
+        }
+    };
+    return cwd.openDir(output_dir_path, .{}) catch {
+        std.log.err(
+            "Couldn't open the output directory `{s}`.",
+            .{output_dir_path},
+        );
+        return error.Error;
+    };
 }
