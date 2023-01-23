@@ -6,16 +6,9 @@ const c = gir.c;
 
 const object = @import("object.zig");
 
-/// A buffer for paths
-var buffer: [std.fs.MAX_PATH_BYTES]u8 = undefined;
-
-/// Concatenate `.zig` to the end of the path
-pub fn concatZig(info_name: [:0]const u8) [:0]const u8 {
-    const ext = ".zig";
-    const file_name = buffer[0..(info_name.len + ext.len) :0];
-    std.mem.copy(u8, file_name, info_name);
-    std.mem.copy(u8, file_name[info_name.len..], ext);
-    return file_name;
+/// Create a slice from a pointer to a null-terminated array
+pub fn sliceFrom(ptr: [*c]const u8) [:0]const u8 {
+    return std.mem.span(@ptrCast([*:0]const u8, ptr));
 }
 
 /// Emit code from a target namespace
@@ -23,6 +16,7 @@ pub fn from(
     repository: *c.GIRepository,
     target_namespace_name: [:0]const u8,
     output_dir: *std.fs.Dir,
+    allocator: std.mem.Allocator,
 ) !void {
     // Prepare a shared error handle
     var g_err: ?*c.GError = null;
@@ -41,19 +35,15 @@ pub fn from(
     // Prepare output directories
     var object_subdir = try object.getSubdir(output_dir);
     defer object_subdir.close();
-    // Get the number of metadata entries in the target namespace
+    // For each index of a metadata entry
     const infos_n = c.g_irepository_get_n_infos(repository, target_namespace_name);
-    // For each index of the metadata entries
     var i: c.gint = 0;
     while (i < infos_n) : (i += 1) {
         // Get the metadata entry
         const info = c.g_irepository_get_info(repository, target_namespace_name, i);
         defer c.g_base_info_unref(info);
         // Depending on the type of the entry, emit the code
-        const info_name = std.mem.span(@ptrCast(
-            [*:0]const u8,
-            c.g_base_info_get_name(info),
-        ));
+        const info_name = sliceFrom(c.g_base_info_get_name(info));
         const info_type = c.g_base_info_get_type(info);
         switch (info_type) {
             c.GI_INFO_TYPE_INVALID => {
@@ -102,6 +92,7 @@ pub fn from(
                 info,
                 info_name,
                 &object_subdir,
+                allocator,
             ) catch {
                 std.log.warn(
                     "Couldn't emit object `{s}`",

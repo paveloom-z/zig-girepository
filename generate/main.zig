@@ -8,7 +8,7 @@ const emit = @import("emit/mod.zig");
 const input = @import("input.zig");
 
 /// Namespace in question
-const target_namespace_name = "GIRepository";
+pub const target_namespace_name = "GIRepository";
 
 /// Process-global default GIRepository
 var repository: *c.GIRepository = undefined;
@@ -24,11 +24,16 @@ pub fn log(
     comptime format: []const u8,
     args: anytype,
 ) void {
+    const red = "\u{001b}[1;31m";
+    const yellow = "\u{001b}[1;33m";
+    const cyan = "\u{001b}[1;36m";
+    const white = "\u{001b}[1;37m";
+    const reset = "\u{001b}[m";
     const level_txt = comptime switch (message_level) {
-        .err => "ERROR",
-        .warn => "WARNING",
-        .info => "INFO",
-        .debug => "DEBUG",
+        .err => red ++ "ERROR" ++ reset,
+        .warn => yellow ++ "WARNING" ++ reset,
+        .info => white ++ "INFO" ++ reset,
+        .debug => cyan ++ "DEBUG" ++ reset,
     };
     const prefix = if (scope == .default) ": " else "(" ++ @tagName(scope) ++ "): ";
     std.debug.getStderrMutex().lock();
@@ -68,6 +73,7 @@ pub fn main() !void {
         repository,
         target_namespace_name,
         &output_dir,
+        allocator,
     ) catch {
         std.log.err("Couldn't emit code from the target namespace.", .{});
         std.os.exit(1);
