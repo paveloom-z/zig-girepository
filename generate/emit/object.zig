@@ -27,14 +27,18 @@ pub fn from(
     info_name: [:0]const u8,
     subdir: *std.fs.Dir,
     allocator: std.mem.Allocator,
-) !void {
+) ![:0]const u8 {
     const object = @ptrCast(*c.GIObjectInfo, info);
     std.log.info("Emitting object `{s}`...", .{info_name});
     // Create a file
+    const lowercase_info_name = try std.ascii.allocLowerString(
+        allocator,
+        info_name,
+    );
     const file_path = try std.mem.concatWithSentinel(
         allocator,
         u8,
-        &.{ info_name, ".zig" },
+        &.{ lowercase_info_name, ".zig" },
         0,
     );
     const file = subdir.createFile(file_path, .{}) catch {
@@ -42,7 +46,7 @@ pub fn from(
         return error.Error;
     };
     defer file.close();
-    // Prepare an array for dependencies
+    // Prepare a hashset for dependencies
     var dependencies = std.StringHashMap(void).init(allocator);
     // Prepare a buffered writer
     var buffered_writer = std.io.bufferedWriter(file.writer());
@@ -143,7 +147,7 @@ pub fn from(
                         "No handle for type tag {}.",
                         .{field_type_tag},
                     );
-                    return;
+                    return error.Error;
                 },
             };
             fields[i] = Field{
@@ -179,4 +183,5 @@ pub fn from(
         });
     }
     try writer.print("}};\n", .{});
+    return file_path;
 }

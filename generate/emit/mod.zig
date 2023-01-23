@@ -35,6 +35,8 @@ pub fn from(
     // Prepare output directories
     var object_subdir = try object.getSubdir(output_dir);
     defer object_subdir.close();
+    // Prepare array lists for dependencies
+    var objects_file_paths = std.ArrayList([]const u8).init(allocator);
     // For each index of a metadata entry
     const infos_n = c.g_irepository_get_n_infos(repository, target_namespace_name);
     var i: c.gint = 0;
@@ -88,16 +90,20 @@ pub fn from(
                     .{info_name},
                 );
             },
-            c.GI_INFO_TYPE_OBJECT => object.from(
-                info,
-                info_name,
-                &object_subdir,
-                allocator,
-            ) catch {
-                std.log.warn(
-                    "Couldn't emit object `{s}`",
-                    .{info_name},
-                );
+            c.GI_INFO_TYPE_OBJECT => {
+                const object_file_path = object.from(
+                    info,
+                    info_name,
+                    &object_subdir,
+                    allocator,
+                ) catch {
+                    std.log.warn(
+                        "Couldn't emit object `{s}`",
+                        .{info_name},
+                    );
+                    continue;
+                };
+                try objects_file_paths.append(object_file_path);
             },
             c.GI_INFO_TYPE_INTERFACE => {
                 std.log.info(
@@ -172,5 +178,46 @@ pub fn from(
                 );
             },
         }
+    }
+    // Create extra files to glue things together
+    var lib_file = output_dir.createFile("lib.zig", .{}) catch {
+        std.log.warn("Couldn't create the `lib.zig` file.", .{});
+        return error.Error;
+    };
+    defer lib_file.close();
+    var lib_file_writer = lib_file.writer();
+    try lib_file_writer.print(
+        \\pub usingnamespace @import("c.zig");
+        \\
+        \\pub usingnamespace @import("objects/mod.zig");
+        \\
+    ,
+        .{},
+    );
+    var c_file = output_dir.createFile("c.zig", .{}) catch {
+        std.log.warn("Couldn't create the `c.zig` file.", .{});
+        return error.Error;
+    };
+    defer c_file.close();
+    var c_file_writer = c_file.writer();
+    try c_file_writer.print(
+        \\pub usingnamespace @cImport({{
+        \\    @cInclude("girepository.h");
+        \\}});
+        \\
+    ,
+        .{},
+    );
+    var objects_mod_file = output_dir.createFile("objects/mod.zig", .{}) catch {
+        std.log.warn("Couldn't create the `objects/mod.zig` file.", .{});
+        return error.Error;
+    };
+    defer objects_mod_file.close();
+    var objects_mod_file_writer = objects_mod_file.writer();
+    for (objects_file_paths.items) |object_file_path| {
+        try objects_mod_file_writer.print(
+            "pub usingnamespace @import(\"{s}\");",
+            .{object_file_path},
+        );
     }
 }
